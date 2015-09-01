@@ -1,101 +1,64 @@
-=begin rspec
-
-The common ancestor of all driver classes. It has default implementations of the
-methods, and it keeps an array of the classes themselves, so we can call methods
-across all of them.
-
-=end
-
 module TripleStoreDrivers
-  class BaseDriver
-    include LastKnownRunning
-
-    @classes = []
+  module BaseDriver
     class << self
-      def inherited(subcls)
-        @classes << subcls
+      def included(clazz)
+        @classes ||= []
+          @classes << clazz
       end
-
-      def running_instance
-        @classes.each do |c|
-          description = c.any_running?
-          if description
-            return description
-          end
-        end
-        return nil
+      
+      def classes
+        @classes
       end
-
-      def stop_any()
-        @classes.each {|c| c.close}
-      end
-
-      #
-      # Each driver class must try to determine whether any instance is running.
-      # It returns a description of the running instance, or nil.
-      #
-      # If not sure that no instances are running, return true.
-      #
-      def any_running?()
-        raise "Subclasses of BaseDriver must define any_running?()"
-      end
-
-      #
-      # Each driver class must try to close any instance. If the instance cannot
-      # be safely closed without loss of data, raise DriverError.
-      #
-      def close()
-        raise "Subclasses of BaseDriver must define close()"
-      end
-
-      # Used for unit tests
+      
       private
-
-      def reset()
+      
+      # Use for unit tests.
+      def reset
         @classes = []
       end
     end
-
+    
     #
-    # Each driver instance must be able to tell whether the triple-store is
-    # running. This involves more than just detecting the running instance.
-    # The current settings must also match the last_known_running.
+    # Ask the current instance for an ingester, and yield it to the supplied block.
+    # The ingester can be used to ingest files of RDF.
     #
-    # If not sure whether the selected instance actually matches the running
-    # triple-store, return false.
-    #
-    def running?()
-      raise "Subclasses of BaseDriver must define running?()"
-    end
-
-    #
-    # Each driver instance must be able to start its triple-store. If successful
-    # it must store the current settings in last_known_running.
-    #
-    def open()
-      raise "Subclasses of BaseDriver must define open()"
-    end
-
-    #
-    # Each driver must be able to enter an ingest mode. For some, this will
-    # have no effect.
-    #
-    # This yields an ingester to the provided block. The ingester will respond to
-    # ingest_file(path, graph_uri)
+    # Will raise TripleStoreDrivers::IllegalStateError if the instance is not 
+    # running, or if this is called from within a do_sparql or another 
+    # do_ingest block.
     #
     def do_ingest()
-      raise "Subclasses of BaseDriver must define do_ingest()"
+      raise IllegalStateError.new("Triple-store is not started.") unless running?
+      raise IllegalStateError.new("Already executing a #{@mode} block") if @mode
+
+      begin
+        @mode = :do_ingest
+        yield get_ingester
+      ensure
+        close_ingester
+        @mode = nil
+      end
     end
 
     #
-    # Each driver must be able to enter a SPARQL mode. For some, this will
-    # have no effect.
+    # Ask the current instance for an sparqler, and yield it to the supplied block.
+    # The sparqler can be used to service sparql queries.
     #
-    # This yields a sparqler to the provided block. The sparqler will respond to
-    # sparql_query(query), yielding an HTTP::Response.
+    # Will raise TripleStoreDrivers::IllegalStateError if the instance is not 
+    # running, or if this is called from within another do_sparql or a 
+    # do_ingest block.
     #
     def do_sparql()
-      raise "Subclasses of BaseDriver must define do_sparql()"
+      raise IllegalStateError.new("Triple-store is not started.") unless running?
+      raise IllegalStateError.new("Already executing a #{@mode} block") if @mode
+
+      begin
+        @mode = :do_sparql
+        yield get_sparqler
+      ensure
+        close_sparqler
+        @mode = nil
+      end
     end
+
   end
 end

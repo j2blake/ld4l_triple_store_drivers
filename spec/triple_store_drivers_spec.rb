@@ -1,13 +1,21 @@
 require 'spec_helper'
 
+module TripleStoreDrivers
+  class << self
+    def warning(message)
+      # disable printed warnings.
+    end
+  end
+end
+
 describe TripleStoreDrivers do
   before do
     TripleStoreDrivers.send(:reset)
-    TripleStoreDrivers::BaseDriver.send(:reset)
+    load 'test_drivers.rb'
   end
 
   it 'has a version number' do
-    expect(TripleStoreDrivers::VERSION).not_to be nil
+    expect(TripleStoreDrivers::VERSION).not_to be(nil)
   end
 
   context 'the select() method' do
@@ -24,27 +32,13 @@ describe TripleStoreDrivers do
     end
 
     it 'instantiates the named driver class' do
-      class DummyDriverClass
-        def initialize(params)
-        end
-      end
-
-      expect {
-        TripleStoreDrivers.select(:class_name => 'DummyDriverClass')
-      }.to_not raise_error
+      TripleStoreDrivers.select(:class_name => 'DummyDriverClass')
+      expect(TripleStoreDrivers.selected.class).to be(DummyDriverClass)
     end
 
     it 'instantiates the named driver class, even in a module' do
-      module DummyModule
-        class DummyDriverClassInModule
-          def initialize(params)
-          end
-        end
-      end
-
-      expect {
-        TripleStoreDrivers.select(:class_name => 'DummyModule::DummyDriverClassInModule')
-      }.to_not raise_error
+      TripleStoreDrivers.select(:class_name => 'DummyModule::DummyDriverClassInModule')
+      expect(TripleStoreDrivers.selected.class).to be(DummyModule::DummyDriverClassInModule)
     end
 
     it 'smoothly handles an error raised by the driver initialization method.' do
@@ -60,121 +54,92 @@ describe TripleStoreDrivers do
     end
   end
 
-  context 'the status() method' do
+  describe 'the status() method' do
     it 'reacts well to the absence of settings' do
       expect(TripleStoreDrivers.status.value).to eq(TripleStoreDrivers::NO_CURRENT_SETTINGS)
     end
 
     it 'knows when the current instance is running' do
-      class RunningDriver < TripleStoreDrivers::BaseDriver
-        def initialize(junk)
-        end
-
-        def running?
-          true
-        end
-
-        class << self
-          def any_running?
-            nil
-          end
-        end
-      end
-
-      TripleStoreDrivers.select(:class_name => 'RunningDriver')
+      TripleStoreDrivers.select(:class_name => 'TestDriver', :test_running => true)
       expect(TripleStoreDrivers.status.value).to eq(TripleStoreDrivers::SELECTED_TRIPLE_STORE_RUNNING)
     end
 
     it 'knows when some other triple-store is running' do
-      class OtherRunningDriver < TripleStoreDrivers::BaseDriver
-        def initialize(junk)
-        end
-
-        def running?
-          false
-        end
-
-        def self.any_running?
-          'Some silly driver instance.'
-        end
-      end
-
-      TripleStoreDrivers.select(:class_name => 'OtherRunningDriver')
+      TripleStoreDrivers.select(:class_name => 'TestDriver', :test_other_running => true)
       expect(TripleStoreDrivers.status.value).to eq(TripleStoreDrivers::OTHER_TRIPLE_STORE_RUNNING)
     end
 
     it 'knows when nothing is running.' do
-      class NotRunningDriver < TripleStoreDrivers::BaseDriver
-        def initialize(junk)
-        end
-
-        def running?
-          false
-        end
-
-        def self.any_running?
-          nil
-        end
-      end
-
-      TripleStoreDrivers.select(:class_name => 'NotRunningDriver')
+      TripleStoreDrivers.select(:class_name => 'TestDriver')
       expect(TripleStoreDrivers.status.value).to eq(TripleStoreDrivers::NO_TRIPLE_STORE_RUNNING)
     end
   end
 
-  context 'the startup() method' do
+  describe 'the startup() method' do
     it 'complains if there are no settings' do
       expect {
         TripleStoreDrivers.startup
       }.to raise_error(TripleStoreDrivers::IllegalStateError)
     end
 
+    it 'starts if a triple-store is not already running' do
+      TripleStoreDrivers.select(:class_name => 'TestDriver')
+      expect {
+        TripleStoreDrivers.startup
+      }.to_not raise_error
+    end
+
     it 'complains if a triple-store is already running' do
-      class RunningDriver < TripleStoreDrivers::BaseDriver
-        def initialize(junk)
-        end
-
-        def running?
-          true
-        end
-
-        class << self
-          def any_running?
-            nil
-          end
-        end
-      end
-
-      TripleStoreDrivers.select(:class_name => 'RunningDriver')
+      TripleStoreDrivers.select(:class_name => 'TestDriver', :test_running => true)
       expect {
         TripleStoreDrivers.startup
       }.to raise_error(TripleStoreDrivers::IllegalStateError)
     end
 
     it 'gracefully handles an error from the driver' do
-      class FailureDriver < TripleStoreDrivers::BaseDriver
-        def initialize(junk)
-        end
-
-        def running?
-          false
-        end
-
-        def open
-          raise 'Not openable'
-        end
-
-        class << self
-          def any_running?
-            nil
-          end
-        end
-      end
-      
-      TripleStoreDrivers.select(:class_name => 'FailureDriver')
+      TripleStoreDrivers.select(:class_name => 'TestDriver', :test_raise_error_on_open => true)
       expect {
         TripleStoreDrivers.startup
       }.to raise_error(TripleStoreDrivers::DriverError, /openable/)
     end
   end
+
+  describe 'the shutdown() method' do
+    it 'doesn\'t object if there are no settings' do
+      expect(TripleStoreDrivers.status.value).to eq(TripleStoreDrivers::NO_CURRENT_SETTINGS)
+      expect {
+        TripleStoreDrivers.shutdown
+      }.to_not raise_error
+    end
+
+    it 'doesn\'t object if no triple-store is running' do
+      TripleStoreDrivers.select(:class_name => 'TestDriver')
+      expect(TripleStoreDrivers.status.value).to eq(TripleStoreDrivers::NO_TRIPLE_STORE_RUNNING)
+      expect {
+        TripleStoreDrivers.shutdown
+      }.to_not raise_error
+    end
+
+    it 'stops a triple-store if it is running' do
+      TripleStoreDrivers.select(:class_name => 'TestDriver', :test_running => true)
+      expect(TripleStoreDrivers.status.value).to eq(TripleStoreDrivers::SELECTED_TRIPLE_STORE_RUNNING)
+      TripleStoreDrivers.shutdown
+      expect(TripleStoreDrivers.status.value).to eq(TripleStoreDrivers::NO_TRIPLE_STORE_RUNNING)
+    end
+
+    it 'gracefully handles an error from the driver' do
+      TripleStoreDrivers.select(:class_name => 'TestDriver', :test_running => true, :test_raise_error_on_close => true)
+      expect {
+        TripleStoreDrivers.shutdown
+      }.to raise_error(TripleStoreDrivers::DriverError, /Failed to stop/)
+    end
+
+    it 'gracefully handles the failure to stop a triple-store' do
+      TripleStoreDrivers.select(:class_name => 'TestDriver', :test_running => true, :test_fail_to_stop => true)
+      expect {
+        TripleStoreDrivers.shutdown
+      }.to raise_error(TripleStoreDrivers::DriverError, /Failed to stop/)
+    end
+  end
+
 end

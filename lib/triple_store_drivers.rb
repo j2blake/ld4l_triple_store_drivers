@@ -4,13 +4,18 @@ require 'net/telnet'
 require 'ostruct'
 require "uri"
 
-require_relative "triple_store_drivers/last_known_running"
+require_relative "triple_store_drivers/version"
+require_relative "triple_store_drivers/http_handler"
 
 require_relative "triple_store_drivers/base_driver"
-require_relative "triple_store_drivers/http_handler"
-require_relative "triple_store_drivers/non_modal_driver"
-require_relative "triple_store_drivers/version"
 require_relative "triple_store_drivers/virtuoso"
+
+module Kernel
+  # Monkey patch for debugging: write a message with a "BOGUS" label to the console.
+  def bogus(message)
+    puts(">>>>>>>>>>>>>BOGUS #{message}")
+  end
+end
 
 module TripleStoreDrivers
   # The triple store is not configured correctly.
@@ -45,20 +50,13 @@ module TripleStoreDrivers
       @value = value
       @description = description
     end
+
+    def to_s
+      "#{value} -- #{description}"
+    end
   end
 
   class << self
-    # Write a warning message to the console.
-    # Something happened that you should know, but we can continue running.
-    def warning(message)
-      puts("WARNING: #{message}")
-    end
-
-    # For debugging: write a message with a "BOGUS" label to the console.
-    def bogus(message)
-      puts(">>>>>>>>>>>>>BOGUS #{message}")
-    end
-
     #
     # Store these settings for the current triple-store operations.
     #
@@ -97,11 +95,12 @@ module TripleStoreDrivers
       return Status.new(NO_CURRENT_SETTINGS, "No settings.") unless @instance
       return Status.new(SELECTED_TRIPLE_STORE_RUNNING, "Running: #{@instance}") if @instance.running?
 
-      running_instance = BaseDriver.running_instance
-      return Status.new(OTHER_TRIPLE_STORE_RUNNING, "Selected: #{@instance}\nRunning: #{running_instance}") if running_instance
+      BaseDriver.classes.each do |clazz|
+        running_instance = clazz.any_running?
+        return Status.new(OTHER_TRIPLE_STORE_RUNNING, "Selected: #{@instance}\nRunning: #{running_instance}") if running_instance
+      end
 
       return Status.new(NO_TRIPLE_STORE_RUNNING, "Not running: #{@instance}")
-      bogus "TripleStoreDrivers::status not implemented"
     end
 
     #
@@ -116,7 +115,6 @@ module TripleStoreDrivers
     #
     def startup()
       raise IllegalStateError.new("No triple-store settings.") unless @instance
-
       s = status
       raise IllegalStateError.new("Stop the triple-store first: #{s.description}") unless s.value == NO_TRIPLE_STORE_RUNNING
 
@@ -126,13 +124,12 @@ module TripleStoreDrivers
           begin
             yield @instance
           ensure
-            BaseDriver.stop_any
+            shutdown
           end
         else
           return @instance
         end
       rescue Exception => e
-        print e.backtrace.join("\n")
         raise DriverError.new("Failed to open the triple-store <#{@instance}>: #{e.message}")
       end
     end
@@ -149,18 +146,35 @@ module TripleStoreDrivers
     #
     def shutdown()
       begin
-        BaseDriver.stop_any
+        BaseDriver.classes.each do |clazz|
+          clazz.close_any
+        end
       rescue Exception => e
-        raise DriverError.new("Failed to stop the triple-store: #{e.message}")
+        warning("Failed to stop the triple-store: #{e.message}")
+      end
+
+      case status.value
+      when SELECTED_TRIPLE_STORE_RUNNING, OTHER_TRIPLE_STORE_RUNNING
+        raise DriverError.new("Failed to stop the triple-store: status is #{status}")
       end
     end
 
-    # Used for unit tests.
-    private
+    def warning(message)
+      puts "WARNING: #{message}"
+    end
 
+    # --------------------------------------------------------------------------
+    private
+    # --------------------------------------------------------------------------
+
+    #
+    # Forget that we have settings or an instance. Use in unit tests.
+    #
     def reset()
       @settings = nil
       @instance = nil
+      @mode = nil
+      BaseDriver.send(:reset)
     end
   end
 end

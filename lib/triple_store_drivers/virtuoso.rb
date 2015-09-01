@@ -1,33 +1,72 @@
 module TripleStoreDrivers
-  class Virtuoso < BaseDriver
-    class <<self
-      def any_running?()
-        return false unless `pgrep virtuoso-t`.size > 0
+  class Virtuoso
+    include TripleStoreDrivers::BaseDriver
+    include TripleStoreDrivers::HttpHandler
+    class << self
+      def set_instance(instance, settings)
+        @instance = instance
+        @settings = settings
       end
 
-      def close()
-        if running?
-          puts "Closing Virtuoso."
-          isql('shutdown;')
-          raise "Failed to stop Virtuoso" if running?
-          clear_last_known
-          puts "Closed."
+      def any_running?()
+        init_file = get_current_init_file
+        return "Virtuoso on #{File.dirname(init_file)}" if init_file
+        nil
+      end
+
+      def close_any
+        @instance.close if (@instance && @instance.running?)
+
+        isql_port = figure_current_isql_port
+        if isql_port
+          isql('shutdown;', :isql_port => isql_port)
+          wait_for_shutdown
         end
-        # Is this right? Perhaps we should just give up, to avoid losing data.
-        # Can we try isql('shutdown', get_last_known)
-        #        if any_running?
-        #          puts "Closing another Virtuoso."
-        #          `pkill virtuoso-t`
-        #          sleep 3
-        raise "Failed to stop another Virtuoso" if any_running?
-        #          clear_last_known
-        #          puts "Closed."
-        #        end
+      end
+
+      def get_current_init_file
+        response = `ps -ef | grep virtuoso-[t]`
+        if response && response.strip.size > 0
+          match = response.match(/\S+$/)
+          if match
+            return nil unless match
+            init_file = match[0]
+            bogus "current init file is #{init_file}"
+            return init_file
+          end
+        end
+      end
+
+      # What is the isql port of the currently running instance? (if not the selected instance)
+      def figure_current_isql_port
+        begin
+          if init_file = get_current_init_file
+            match = `pcregrep -M '\[Parameters\](\s)+ServerPort\s+=\s+(\S+)' #{init_file.strip}`
+            bogus "MATCH>>#{match.inspect}<<"
+            if match && match.strip.size > 0
+              port = match.strip.split.last.to_i
+              if port && port > 0
+                return port
+              end
+            end
+          end
+        rescue Exception => e
+          bogus "Exception raised: #{e}"
+          nil
+        end
+      end
+
+      def isql(command, port)
+        output = `isql #{port} dba dba exec="#{command}"`
+        if output.include?('Error')
+          raise output
+        end
+      end
+
+      def wait_for_shutdown()
+        0.step(@settings[:seconds_to_startup], 3) { return if `pgrep virtuoso-t`.size == 0 }
       end
     end
-
-    include NonModalDriver
-    include HttpHandler
 
     #
     # All of the parameters have reasonable defaults except the :data_dir.
@@ -52,57 +91,64 @@ module TripleStoreDrivers
 
       @isql_port = @params[:isql_port]
       @http_port = @params[:http_port]
-
       @params[:number_of_buffers] = 85000 * @params[:gigs_of_ram]
       @params[:max_dirty_buffers] = 62500 * @params[:gigs_of_ram]
 
-      @ingesting = false
+      self.class.set_instance(self, @params)
     end
 
-    def running?()
-      #
-      # It's easy to detect that the process is present, but has it completed
-      # initialization? Is it in the process of shutting down? Try repeatedly to
-      # connect to both the ISQL port and the HTTP port, to allow it time to either
-      # startup or die off.
-      #
-      def running?()
-        return false unless match_last_known?(@params)
-
-        0.step(@params[:seconds_to_startup], 3) do
-          begin
-            return false unless `pgrep virtuoso-t`.size > 0
-            Net::Telnet::new("Port" => @isql_port, "Timeout" => 2).close
-            Net::Telnet::new("Port" => @http_port, "Timeout" => 2).close
-            return true
-          rescue Exception => e
-            sleep 3
-          end
+    #
+    # It's easy to detect that the process is present, but has it completed
+    # initialization? Is it in the process of shutting down? Try repeatedly to
+    # connect to both the ISQL port and the HTTP port, to allow it time to either
+    # startup or die off.
+    #
+    def running?
+      0.step(@params[:seconds_to_startup], 3) do
+        begin
+          return false unless `pgrep virtuoso-t`.size > 0
+          Net::Telnet::new("Port" => @isql_port, "Timeout" => 2).close
+          Net::Telnet::new("Port" => @http_port, "Timeout" => 2).close
+          return true
+        rescue Exception => e
+          sleep 3
         end
-        false
       end
+      false
     end
 
-    def open()
-      puts "Opening Virtuoso in #{@data_dir} \n   #{@params.inspect}"
-
-      clear_last_known
-
+    def open
+      puts "Opening Virtuoso in #{@data_dir} \n   #{@params.to_a.map {|i| "#{i[0]} => #{i[1]}"}.join("\n   ")}}"
       prepare_ini_file
 
       Dir.chdir(@data_dir) do
         `virtuoso-t -c #{@data_dir}/virtuoso.ini`
         raise "Failed to open Virtuoso: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
-      end
-
-      set_last_known(@params)
-
-      unless running?
-        raise "Failed to open Virtuoso"
-        clear_last_known
+        raise "Failed to open Virtuoso -- not running" unless running?
       end
 
       puts 'Opened Virtuoso.'
+    end
+
+    def close
+      puts 'Closing Virtuoso.'
+      isql('shutdown;')
+      raise 'Failed to close Virtuoso -- still running' if running?
+      puts 'Closed.'
+    end
+
+    def get_ingester
+      self
+    end
+
+    def close_ingester
+    end
+
+    def get_sparqler
+      self
+    end
+
+    def close_sparqler
     end
 
     def prepare_ini_file()
@@ -114,15 +160,11 @@ module TripleStoreDrivers
       end
     end
 
-    def isql(command, params=@params)
-      output = `isql #{params[:isql_port]} #{params[:username]} #{params[:password]} exec="#{command}"`
-      if output.include?('Error')
-        raise output
-      end
+    def isql(command)
+      self.class.isql(command, @params[:isql_port])
     end
 
     def sparql_query(sparql, &block)
-      assert_mode(:sparql)
       params = {'query' => sparql}
       headers = {'accept' => 'application/sparql-results+json'}
       http_post("http://localhost:#{@http_port}/sparql/", block, params, headers)
@@ -136,7 +178,6 @@ module TripleStoreDrivers
     # Since Virtuoso keeps a record of the files that is has already ingested, we need to
     # clear that record in order to load repeatedly from the same link.
     def ingest_file(path, graph_uri)
-      assert_mode(:ingest)
       ext = recognize_extension(path)
       Dir.chdir(@data_dir) do
         `ln -sf #{path} ingest_link#{ext}`
