@@ -80,6 +80,9 @@ module TripleStoreDrivers
     # connect to both the ISQL port and the HTTP port, to allow it time to either
     # startup or die off.
     #
+    # TODO: work from the full ps -ef line, so we can distinguish between this
+    # instance and another.
+    #
     def running?
       0.step(@params[:seconds_to_startup], 3) do
         begin
@@ -147,20 +150,20 @@ module TripleStoreDrivers
       http_post("http://localhost:#{@http_port}/sparql/", block, params, headers)
     end
 
-    # Need to use the bulk ingest method in order to load a file larger than 10 MBytes
     #
     # Since Virtuoso will only ingest files from authorized directories, create a symbolic
     # link in the home directory, and ingest from there.
     #
-    # Since Virtuoso keeps a record of the files that is has already ingested, we need to
-    # clear that record in order to load repeatedly from the same link.
+    # This method of ingesting large files is shown here:
+    # https://code.google.com/p/aksw-commons/wiki/Virtuoso_ISQL
+    # but it appears to work only for Turtle, NTriples, or RDF/XML.
+    #
     def ingest_file(path, graph_uri)
+      full_path = File.expand_path(path)
       ext = recognize_extension(path)
       Dir.chdir(@data_dir) do
-        `ln -sf #{path} ingest_link#{ext}`
-        isql('delete from DB.DBA.load_list;')
-        isql("ld_dir('#{@data_dir}', 'ingest_link#{ext}', '#{graph_uri}');")
-        isql('rdf_loader_run();')
+        `ln -sf #{full_path} ingest_link#{ext}`
+        submit_the_ingest_job(ext, graph_uri)
         `rm ingest_link#{ext}`
       end
     end
@@ -172,6 +175,14 @@ module TripleStoreDrivers
       else
         warning("unrecognized extension on '#{path}'")
         '.rdf'
+      end
+    end
+
+    def submit_the_ingest_job(ext, graph_uri)
+      if ['.rdf', '.owl'].include?(ext)
+        isql("db.dba.rdf_load_rdfxml(file_to_string_output('ingest_link#{ext}'), '', '#{graph_uri}');")
+      else
+        isql("ttlp_mt(file_to_string_output('ingest_link#{ext}'), '', '#{graph_uri}');")
       end
     end
 
