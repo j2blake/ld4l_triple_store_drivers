@@ -14,8 +14,24 @@ module TripleStoreDrivers
 
         begin
           http.request(request) do |response|
-            response.value
-            block.call(response) if block
+            if response.code == "301"
+              redirect = Net::HTTP::Post.new(URI.parse(response.header['location']).request_uri)
+              redirect.set_form_data(params)
+              headers.each_pair do |k, v|
+                redirect[k] = v
+              end
+              response = http.request(redirect)
+            end
+
+            if response.code == "200"
+              block.call(response) if block
+            else
+              if block_given?
+                yield response
+              else
+                response.value
+              end
+            end
           end
         rescue IOError => e
           raise e.exception(e.message << "\nProblem request: \n#{inspect_request(request, url)}")

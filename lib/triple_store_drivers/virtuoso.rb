@@ -147,9 +147,9 @@ module TripleStoreDrivers
     def sparql_query(sparql, &block)
       params = {'query' => sparql}
       headers = {'accept' => 'application/sparql-results+json'}
-      http_post("http://localhost:#{@http_port}/sparql/", block, params, headers)
+      http_post("http://localhost:#{@http_port}/sparql/", block, params, headers) 
     end
-
+    
     #
     # Since Virtuoso will only ingest files from authorized directories, create a symbolic
     # link in the home directory, and ingest from there.
