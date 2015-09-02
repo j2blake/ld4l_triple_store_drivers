@@ -15,11 +15,12 @@ module TripleStoreDrivers
       end
 
       def close_any
-        @instance.close if (@instance && @instance.running?)
-
-        isql_port = figure_current_isql_port
-        if isql_port
-          isql('shutdown;', :isql_port => isql_port)
+        if @instance && @instance.running?
+          @instance.close
+          wait_for_shutdown
+        end
+        if any_running?
+          isql('shutdown;')
           wait_for_shutdown
         end
       end
@@ -27,40 +28,16 @@ module TripleStoreDrivers
       def get_current_init_file
         response = `ps -ef | grep virtuoso-[t]`
         if response && response.strip.size > 0
-          match = response.match(/\S+$/)
-          if match
-            return nil unless match
-            init_file = match[0]
-            bogus "current init file is #{init_file}"
-            return init_file
-          end
-        end
-      end
-
-      # What is the isql port of the currently running instance? (if not the selected instance)
-      def figure_current_isql_port
-        begin
-          if init_file = get_current_init_file
-            match = `pcregrep -M '\[Parameters\](\s)+ServerPort\s+=\s+(\S+)' #{init_file.strip}`
-            bogus "MATCH>>#{match.inspect}<<"
-            if match && match.strip.size > 0
-              port = match.strip.split.last.to_i
-              if port && port > 0
-                return port
-              end
-            end
-          end
-        rescue Exception => e
-          bogus "Exception raised: #{e}"
+          response.match(/\S+$/)[0]
+        else
           nil
         end
       end
 
-      def isql(command, port)
-        output = `isql #{port} dba dba exec="#{command}"`
-        if output.include?('Error')
-          raise output
-        end
+      def isql(command)
+        output = `isql #{@settings[:isql_port]} #{@settings[:username]} #{@settings[:password]} exec="#{command}" 2>&1`
+        error_here = output.index('Error')
+        raise output[error_here..-1] if error_here
       end
 
       def wait_for_shutdown()
@@ -161,7 +138,7 @@ module TripleStoreDrivers
     end
 
     def isql(command)
-      self.class.isql(command, @params[:isql_port])
+      self.class.isql(command)
     end
 
     def sparql_query(sparql, &block)
