@@ -44,15 +44,15 @@ module TripleStoreDrivers
       :seconds_to_startup => 60}
 
     def initialize(params)
-      @params = DEFAULT_PARAMS.merge(params)
+      @settings = DEFAULT_PARAMS.merge(params)
 
-      @data_dir = @params[:data_dir]
+      @data_dir = @settings[:data_dir]
       raise SettingsError.new("Data directory doesn't exist: #{@data_dir}") if !Dir.exists?(File.dirname(@data_dir))
       Dir.mkdir(@data_dir) if !Dir.exists?(@data_dir)
 
-      @http_port = @params[:http_port]
+      @http_port = @settings[:http_port]
 
-      self.class.set_instance(self, @params)
+      self.class.set_instance(self, @settings)
     end
 
     #
@@ -63,7 +63,7 @@ module TripleStoreDrivers
     # instance and another.
     #
     def running?()
-      0.step(@params[:seconds_to_startup], 3) do
+      0.step(@settings[:seconds_to_startup], 3) do
         begin
           return false unless `pgrep -f bigdata-bundled`.size > 0
           sparql_query('SELECT * WHERE { ?s ?p ?o } LIMIT 1') {}
@@ -77,12 +77,12 @@ module TripleStoreDrivers
 
     def open
       begin
-        puts "Opening BlazeGraph in #{@data_dir} \n   #{@params.to_a.map {|i| "#{i[0]} => #{i[1]}"}.join("\n   ")}}"
+        puts "Opening #{self} \n   #{@settings.to_a.map {|i| "#{i[0]} => #{i[1]}"}.join("\n   ")}}"
         prepare_settings_file
 
         Dir.chdir(@data_dir) do
           cmd = "java -server "
-          cmd << "-Xmx#{@params[:gigs_of_ram]}g "
+          cmd << "-Xmx#{@settings[:gigs_of_ram]}g "
           cmd << "-Dbigdata.propertyFile=blazegraph.properties "
           cmd << "-jar /Users/jeb228/Downloads/LD4L/BlazeGraph/bigdata-bundled.jar"
           spawn( cmd, :out => 'stdout', :err => 'stderr')
@@ -90,7 +90,7 @@ module TripleStoreDrivers
           raise "Failed to open BlazeGraph -- not running" unless running?
         end
 
-        puts 'Opened BlazeGraph.'
+        puts 'Opened.'
       rescue Exception => e
         bogus e
         bogus e.backtrace.join("\n")
@@ -101,17 +101,17 @@ module TripleStoreDrivers
     def prepare_settings_file()
       File.open(File.expand_path('blazegraph.properties.template', File.dirname(__FILE__))) do |i|
         File.open("#{@data_dir}/blazegraph.properties", 'w') do |o|
-          namespace = OpenStruct.new(@params)
+          namespace = OpenStruct.new(@settings)
           o.write(ERB.new(i.read).result(namespace.instance_eval { binding }))
         end
       end
     end
 
     def close
-      puts 'Closing BlazeGraph.'
+      puts "Closing #{self}."
       `pkill -f bigdata-bundled`
-      raise "Failed to stop BlazeGraph: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
-      raise "Failed to stop BlazeGraph -- still running" if running?
+      raise "Failed to stop #{self}: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
+      raise "Failed to stop #{self} -- still running" if running?
       puts 'Closed.'
     end
 
@@ -144,8 +144,35 @@ module TripleStoreDrivers
     def close_sparqler
     end
 
+    def clear
+      raise IllegalStateError.new("Clear not permitted") unless clear_permitted?
+      raise IllegalStateError.new("#{self} is running") if running?
+
+      Dir.chdir(@data_dir) do
+        File.delete('bigdata.jnl')
+        File.delete('rules.log')
+        File.delete('stdout')
+        File.delete('stderr')
+      end
+    end
+
+    def size()
+      return 0 unless running?
+      
+      sparql_query('SELECT (COUNT(*) as ?count) WHERE { GRAPH ?g { ?s ?p ?o } }') { |r|
+        json = JSON.parse(r.body)
+        begin
+          return json['results']['bindings'][0]['count']['value'].to_s.to_i
+        rescue Exception => e
+          puts e
+        end
+      }
+
+      0
+    end
+
     def to_s
-      "BlazeGraph in #{@data_dir}"
+      @settings[:name] || 'BlazeGraph (NO NAME)'
     end
   end
 end

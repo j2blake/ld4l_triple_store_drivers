@@ -1,4 +1,5 @@
 require 'erb'
+require 'json'
 require 'net/http'
 require 'net/telnet'
 require 'ostruct'
@@ -50,6 +51,15 @@ module TripleStoreDrivers
     def initialize(value, description)
       @value = value
       @description = description
+    end
+
+    def running?
+      case value
+      when SELECTED_TRIPLE_STORE_RUNNING, OTHER_TRIPLE_STORE_RUNNING
+        true
+      else
+        false
+      end
     end
 
     def to_s
@@ -154,10 +164,7 @@ module TripleStoreDrivers
         warning("Failed to stop the triple-store: #{e.message}")
       end
 
-      case status.value
-      when SELECTED_TRIPLE_STORE_RUNNING, OTHER_TRIPLE_STORE_RUNNING
-        raise DriverError.new("Failed to stop the triple-store: status is #{status}")
-      end
+      raise DriverError.new("Failed to stop the triple-store: status is #{status}") if status.running?()
     end
 
     def warning(message)

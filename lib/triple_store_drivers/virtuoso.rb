@@ -38,6 +38,7 @@ module TripleStoreDrivers
         output = `isql #{@settings[:isql_port]} #{@settings[:username]} #{@settings[:password]} exec="#{command}" 2>&1`
         error_here = output.index('Error')
         raise output[error_here..-1] if error_here
+        output
       end
 
       def wait_for_shutdown()
@@ -59,19 +60,19 @@ module TripleStoreDrivers
       :password => 'dba'}
 
     def initialize(params)
-      @params = DEFAULT_PARAMS.merge(params)
+      @settings = DEFAULT_PARAMS.merge(params)
 
-      @data_dir = @params[:data_dir]
+      @data_dir = @settings[:data_dir]
       if !Dir.exists?(@data_dir) && !Dir.exists?(File.dirname(@data_dir))
         complain("Data directory doesn't exist: #{@data_dir}")
       end
 
-      @isql_port = @params[:isql_port]
-      @http_port = @params[:http_port]
-      @params[:number_of_buffers] = 85000 * @params[:gigs_of_ram]
-      @params[:max_dirty_buffers] = 62500 * @params[:gigs_of_ram]
+      @isql_port = @settings[:isql_port]
+      @http_port = @settings[:http_port]
+      @settings[:number_of_buffers] = 85000 * @settings[:gigs_of_ram]
+      @settings[:max_dirty_buffers] = 62500 * @settings[:gigs_of_ram]
 
-      self.class.set_instance(self, @params)
+      self.class.set_instance(self, @settings)
     end
 
     #
@@ -84,7 +85,7 @@ module TripleStoreDrivers
     # instance and another.
     #
     def running?
-      0.step(@params[:seconds_to_startup], 3) do
+      0.step(@settings[:seconds_to_startup], 3) do
         begin
           return false unless `pgrep virtuoso-t`.size > 0
           Net::Telnet::new("Port" => @isql_port, "Timeout" => 2).close
@@ -98,7 +99,7 @@ module TripleStoreDrivers
     end
 
     def open
-      puts "Opening Virtuoso in #{@data_dir} \n   #{@params.to_a.map {|i| "#{i[0]} => #{i[1]}"}.join("\n   ")}}"
+      puts "Opening #{self} \n   #{@settings.to_a.map {|i| "#{i[0]} => #{i[1]}"}.join("\n   ")}}"
       prepare_ini_file
 
       Dir.chdir(@data_dir) do
@@ -107,13 +108,13 @@ module TripleStoreDrivers
         raise "Failed to open Virtuoso -- not running" unless running?
       end
 
-      puts 'Opened Virtuoso.'
+      puts 'Opened.'
     end
 
     def close
-      puts 'Closing Virtuoso.'
+      puts "Closing #{self}."
       isql('shutdown;')
-      raise 'Failed to close Virtuoso -- still running' if running?
+      raise "Failed to close #{self} -- still running" if running?
       puts 'Closed.'
     end
 
@@ -134,7 +135,7 @@ module TripleStoreDrivers
     def prepare_ini_file()
       File.open(File.expand_path('virtuoso.ini.template', File.dirname(__FILE__))) do |i|
         File.open("#{@data_dir}/virtuoso.ini", 'w') do |o|
-          namespace = OpenStruct.new(@params)
+          namespace = OpenStruct.new(@settings)
           o.write(ERB.new(i.read).result(namespace.instance_eval { binding }))
         end
       end
@@ -147,9 +148,9 @@ module TripleStoreDrivers
     def sparql_query(sparql, &block)
       params = {'query' => sparql}
       headers = {'accept' => 'application/sparql-results+json'}
-      http_post("http://localhost:#{@http_port}/sparql/", block, params, headers) 
+      http_post("http://localhost:#{@http_port}/sparql/", block, params, headers)
     end
-    
+
     #
     # Since Virtuoso will only ingest files from authorized directories, create a symbolic
     # link in the home directory, and ingest from there.
@@ -186,8 +187,31 @@ module TripleStoreDrivers
       end
     end
 
-    def to_s
-      "Virtuoso on #{@data_dir}"
+    def size()
+      return 0 unless running?
+
+      cmd = 'SPARQL SELECT COUNT(*) WHERE {GRAPH  ?g { ?s ?p ?o } '
+      cmd << 'FILTER (?g NOT IN (<http://www.openlinksw.com/schemas/virtrdf#>, <http://www.w3.org/ns/ldp#>)) . } ;'
+      output = isql(cmd)
+      
+      output.lines.each do |line|
+        return line.to_i if line =~ /^\d+$/
+      end
+      0
+    end
+
+    def clear()
+      raise IllegalStateError.new("Clear not permitted on #{self}") unless clear_permitted?
+      raise IllegalStateError.new("#{self} is running") if running?
+
+      open
+      isql('RDF_GLOBAL_RESET ();')
+      isql('delete from DB.DBA.load_list;')
+      close
+    end
+
+    def to_s()
+      @settings[:name] || 'Virtuoso (NO NAME)'
     end
   end
 end

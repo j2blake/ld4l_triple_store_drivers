@@ -3,27 +3,27 @@ module TripleStoreDrivers
     class << self
       def included(clazz)
         @classes ||= []
-          @classes << clazz
+        @classes << clazz
       end
-      
+
       def classes
         @classes
       end
-      
+
       private
-      
+
       # Use for unit tests.
       def reset
         @classes = []
       end
     end
-    
+
     #
     # Ask the current instance for an ingester, and yield it to the supplied block.
     # The ingester can be used to ingest files of RDF.
     #
-    # Will raise TripleStoreDrivers::IllegalStateError if the instance is not 
-    # running, or if this is called from within a do_sparql or another 
+    # Will raise TripleStoreDrivers::IllegalStateError if the instance is not
+    # running, or if this is called from within a do_sparql or another
     # do_ingest block.
     #
     def do_ingest()
@@ -43,8 +43,8 @@ module TripleStoreDrivers
     # Ask the current instance for an sparqler, and yield it to the supplied block.
     # The sparqler can be used to service sparql queries.
     #
-    # Will raise TripleStoreDrivers::IllegalStateError if the instance is not 
-    # running, or if this is called from within another do_sparql or a 
+    # Will raise TripleStoreDrivers::IllegalStateError if the instance is not
+    # running, or if this is called from within another do_sparql or a
     # do_ingest block.
     #
     def do_sparql()
@@ -60,5 +60,11 @@ module TripleStoreDrivers
       end
     end
 
+    #
+    # Is it permissible to clear the triples from the current instance?
+    #
+    def clear_permitted?
+      @settings[:clear_permitted]
+    end
   end
 end
