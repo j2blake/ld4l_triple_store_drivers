@@ -64,7 +64,7 @@ module TripleStoreDrivers
 
       @data_dir = @settings[:data_dir]
       if !Dir.exists?(@data_dir) && !Dir.exists?(File.dirname(@data_dir))
-        complain("Data directory doesn't exist: #{@data_dir}")
+        raise IllegalStateError.new("Data directory doesn't exist: #{@data_dir}")
       end
 
       @isql_port = @settings[:isql_port]
