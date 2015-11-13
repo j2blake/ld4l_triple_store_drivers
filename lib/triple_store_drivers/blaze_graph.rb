@@ -130,9 +130,9 @@ module TripleStoreDrivers
       self
     end
 
-    def sparql_query(sparql, &block)
+    def sparql_query(sparql, format='application/sparql-results+json', &block)
       params = {'query' => sparql}
-      headers = {'accept' => 'application/sparql-results+json'}
+      headers = {'accept' => format}
       http_post("http://localhost:#{@http_port}/sparql", block, params, headers) { |r| raise_http_error(r) }
     end
 
