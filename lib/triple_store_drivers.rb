@@ -11,6 +11,7 @@ require_relative "triple_store_drivers/http_handler"
 require_relative "triple_store_drivers/base_driver"
 require_relative "triple_store_drivers/blaze_graph"
 require_relative "triple_store_drivers/fuseki2"
+require_relative "triple_store_drivers/sesame"
 require_relative "triple_store_drivers/virtuoso"
 
 module Kernel
@@ -163,6 +164,7 @@ module TripleStoreDrivers
         end
       rescue Exception => e
         warning("Failed to stop the triple-store: #{e.message}")
+        puts e.backtrace.join("\n")
       end
 
       raise DriverError.new("Failed to stop the triple-store: status is #{status}") if status.running?()
