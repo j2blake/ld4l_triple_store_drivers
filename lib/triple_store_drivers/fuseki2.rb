@@ -33,7 +33,7 @@ module TripleStoreDrivers
     # All of the parameters have reasonable defaults.
     #
     DEFAULT_PARAMS = {
-      :data_dir => '/Users/jeb228/TripleStores/Fuseki2/myDataset',
+      :data_dir => 'NO DATA DIRECTORY',
       :http_port => 3030,
       :dataset_name => 'ds',
       :seconds_to_startup => 30
@@ -117,7 +117,6 @@ module TripleStoreDrivers
     def size()
       return 0 unless running?
       sparql_query("SELECT (count(*) as ?count) WHERE { GRAPH ?g { ?s ?p ?o } }") do |resp|
-        #        bogus "response=#{resp.body}"
         return JSON.parse(resp.body)['results']['bindings'][0]['count']['value'].to_i
       end
       0
