@@ -10,6 +10,7 @@ require_relative "triple_store_drivers/http_handler"
 
 require_relative "triple_store_drivers/base_driver"
 require_relative "triple_store_drivers/blaze_graph"
+require_relative "triple_store_drivers/four_store"
 require_relative "triple_store_drivers/fuseki2"
 require_relative "triple_store_drivers/sesame"
 require_relative "triple_store_drivers/virtuoso"
