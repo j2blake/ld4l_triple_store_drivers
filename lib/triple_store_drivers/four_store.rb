@@ -49,7 +49,8 @@ module TripleStoreDrivers
       :base_data_dir => '/var/lib/4store',
       :data_dir => '/ACTUAL/DATA/DIRECTORY/NOT/SPECIFIED',
       :seconds_to_startup => 30,
-      :db_name => 'mydb'
+      :db_name => 'mydb',
+      :http_port => 8000
     }
 
     def initialize(params)
@@ -60,6 +61,7 @@ module TripleStoreDrivers
 
       @base_data_dir = @settings[:base_data_dir]
       @db_name = @settings[:db_name]
+      @http_port = @settings[:http_port]
       self.class.set_instance(self, @settings)
     end
 
@@ -101,7 +103,7 @@ module TripleStoreDrivers
       puts `4s-backend #{@db_name}`
       raise "Failed to start 4store backend: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
 
-      puts `4s-httpd -p 8000 -s -1 #{@db_name}`
+      puts `4s-httpd -p #{@http_port} -s -1 #{@db_name}`
       raise "Failed to start 4store frontend: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
 
       raise "Failed to start 4store" unless running?
@@ -143,7 +145,7 @@ module TripleStoreDrivers
     def sparql_query(sparql, format='application/sparql-results+json', &block)
       params = {'query' => sparql}
       headers = {'accept' => format}
-      http_post('http://localhost:8000/sparql/', block, params, headers)
+      http_post("http://localhost:#{@http_port}/sparql/", block, params, headers)
     end
 
     def ingest_file(path, graph_uri)
@@ -153,14 +155,16 @@ module TripleStoreDrivers
     def sparql_update(sparql, &block)
       params = {'update' => sparql}
       headers = {}
-      http_post('http://localhost:8000/update/', block, params, headers)
+      http_post("http://localhost:#{@http_port}/update/", block, params, headers)
     end
 
     def size()
       return 0 unless running?
-      sparql_query("SELECT (count(*) as ?count) WHERE { GRAPH ?g { ?s ?p ?o } }") do |resp|
-        return JSON.parse(resp.body)['results']['bindings'][0]['count']['value'].to_i
-      end
+      block = Proc.new { |resp|
+        return 0 unless resp.body =~ /Total[dht\/<>]+(\d+)/m # <th>Total</th><td>20000000</td>
+        return $1.to_i
+      }
+      http_get("http://localhost:#{@http_port}/status/size/", block, {}, {})
     end
 
     def clear()
