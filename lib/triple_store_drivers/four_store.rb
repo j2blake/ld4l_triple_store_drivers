@@ -91,7 +91,6 @@ module TripleStoreDrivers
 
       `mv #{link} #{link_to}`
       raise "Failed to move the data directory: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
-      bogus "MADE DIRECTORY: #{link_to}"
 
       puts `ln -s #{link_to} #{link}`
       raise "Failed to create the link: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
@@ -171,11 +170,9 @@ module TripleStoreDrivers
       raise IllegalStateError.new("Clear not permitted on #{self}") unless clear_permitted?
       raise IllegalStateError.new("#{self} is running") if running?
 
-      puts `4s-backend-destroy #{@db_name}`
-      raise "Failed to destroy 4store repository: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
-
-      puts `4s-backend-setup #{@db_name}`
-      raise "Failed to create 4store repository: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
+      FileUtils.rm_r(File.expand_path(@db_name, @data_dir))
+      FileUtils.rm(File.expand_path(@db_name, @base_data_dir))
+      create()
     end
 
     def to_s()

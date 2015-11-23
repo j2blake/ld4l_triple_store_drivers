@@ -1,4 +1,5 @@
 require 'erb'
+require 'fileutils'
 require 'json'
 require 'net/http'
 require 'net/telnet'
