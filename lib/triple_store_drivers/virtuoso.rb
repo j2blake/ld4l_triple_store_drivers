@@ -204,10 +204,8 @@ module TripleStoreDrivers
       raise IllegalStateError.new("Clear not permitted on #{self}") unless clear_permitted?
       raise IllegalStateError.new("#{self} is running") if running?
 
-      open
-      isql('RDF_GLOBAL_RESET ();')
-      isql('delete from DB.DBA.load_list;')
-      close
+      FileUtils.rm_rf(@data_dir)
+      Dir.mkdir(@data_dir)
     end
 
     def to_s()
