@@ -15,7 +15,6 @@ For size, go to http://localhost:8000/status/size/
 module TripleStoreDrivers
   class FourStore
     include TripleStoreDrivers::BaseDriver
-    include TripleStoreDrivers::HttpHandler
     class << self
       def set_instance(instance, settings)
         @instance = instance
@@ -56,75 +55,44 @@ module TripleStoreDrivers
     def initialize(params)
       @settings = DEFAULT_PARAMS.merge(params)
 
-      @data_dir = @settings[:data_dir]
-      raise IllegalStateError.new("Data directory doesn't exist: #{@data_dir}") unless Dir.exists?(@data_dir)
+      @constructor = Constructor.new(@settings[:db_name], @settings[:data_dir], @settings[:base_data_dir])
+      @backend = Backend.new(@settings[:db_name])
+      @httpd = Httpd.new(@settings[:http_port], @settings[:db_name])
 
-      @base_data_dir = @settings[:base_data_dir]
-      @db_name = @settings[:db_name]
-      @http_port = @settings[:http_port]
       self.class.set_instance(self, @settings)
     end
 
     def running?()
-      (1..10).each do
-        begin
-          return false if `pgrep 4s-backend`.empty?
-          return false if `pgrep 4s-httpd`.empty?
-          sparql_query('SELECT ?s WHERE {?s ?p ?o} LIMIT 1') {}
-          return true
-        rescue Exception => e
-          sleep 2
-        end
-      end
-      false
-    end
-
-    def create
-      link_to = File.expand_path(@db_name, @data_dir)
-      link = File.expand_path(@db_name, @base_data_dir)
-      
-      raise IllegalStateError.new("Data directory already exists: #{link_to}") if Dir.exists?(link_to)
-      raise IllegalStateError.new("Link to data directory already exists: #{link}") if Dir.exists?(link)
-
-      puts `4s-backend-setup #{@db_name}`
-      raise "4s-backend-setup failed: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
-
-      `mv #{link} #{link_to}`
-      raise "Failed to move the data directory: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
-
-      puts `ln -s #{link_to} #{link}`
-      raise "Failed to create the link: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
+      return false unless @backend.running?
+      return false unless @httpd.running?
+      true
     end
 
     def open
-      puts "Opening #{self} \n   #{@settings.to_a.map {|i| "#{i[0]} => #{i[1]}"}.join("\n   ")}}"
+      puts "Opening #{self} \n   #{format_settings}}"
+      @backend.open
+      @httpd.open
+      if running?
+        puts 'Opened.'
+      else
+        raise "Failed to start #{self}"
+      end
+    end
 
-      puts `4s-backend #{@db_name}`
-      raise "Failed to start 4store backend: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
-
-      puts `4s-httpd -p #{@http_port} -s -1 #{@db_name}`
-      raise "Failed to start 4store frontend: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
-
-      raise "Failed to start 4store" unless running?
-
-      puts 'Opened.'
+    def format_settings
+      @settings.to_a.map {|i| "#{i[0]} => #{i[1]}"}.join("\n   ")
     end
 
     def close
       puts "Closing #{self}."
-
-      unless `pgrep 4s-httpd`.empty?
-        puts `pkill 4s-httpd`
-        raise "Failed to stop 4store frontend: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
+      @httpd.close
+      @backend.close
+      if running?
+        raise "Failed to close #{self} -- still running"
+      else
+        puts 'Closed.'
       end
 
-      unless `pgrep 4s-backend`.empty?
-        puts `pkill 4s-backend`
-        raise "Failed to stop 4store backend: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
-      end
-
-      raise "Failed to close #{self} -- still running" if running?
-      puts 'Closed.'
     end
 
     def get_ingester
@@ -142,22 +110,125 @@ module TripleStoreDrivers
     end
 
     def sparql_query(sparql, format='application/sparql-results+json', &block)
-      params = {'query' => sparql}
-      headers = {'accept' => format}
-      http_post("http://localhost:#{@http_port}/sparql/", block, params, headers)
-    end
-
-    def ingest_file(path, graph_uri)
-      sparql_update("LOAD <file://#{path}> INTO GRAPH <#{graph_uri}>") {}
+      @httpd.sparql_query(sparql, format, &block)
     end
 
     def sparql_update(sparql, &block)
-      params = {'update' => sparql}
-      headers = {}
-      http_post("http://localhost:#{@http_port}/update/", block, params, headers)
+      @httpd.sparql_update(sparql, &block)
+    end
+
+    def ingest_file(path, graph_uri)
+      @httpd.sparql_update("LOAD <file://#{path}> INTO GRAPH <#{graph_uri}>") {}
     end
 
     def size()
+      @httpd.size
+    end
+
+    def clear()
+      raise IllegalStateError.new("Clear not permitted on #{self}") unless clear_permitted?
+      raise IllegalStateError.new("#{self} is running") if running?
+      @constructor.destroy
+      @constructor.create
+    end
+
+    def to_s()
+      @settings[:name] || '4store (NO NAME)'
+    end
+  end
+
+  class Constructor
+    def initialize(db_name, data_dir, base_data_dir)
+      @db_name = db_name
+      @data_dir = data_dir
+      @base_data_dir = base_data_dir
+      raise IllegalStateError.new("Data directory doesn't exist: #{@data_dir}") unless Dir.exists?(@data_dir)
+    end
+
+    def create
+      link_to = File.expand_path(@db_name, @data_dir)
+      link = File.expand_path(@db_name, @base_data_dir)
+
+      raise IllegalStateError.new("Data directory already exists: #{link_to}") if Dir.exists?(link_to)
+      raise IllegalStateError.new("Link to data directory already exists: #{link}") if Dir.exists?(link)
+
+      puts `4s-backend-setup #{@db_name}`
+      raise "4s-backend-setup failed: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
+
+      `mv #{link} #{link_to}`
+      raise "Failed to move the data directory: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
+
+      puts `ln -s #{link_to} #{link}`
+      raise "Failed to create the link: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
+    end
+
+    def destroy
+      FileUtils.rm_r(File.expand_path(@db_name, @data_dir))
+      FileUtils.rm(File.expand_path(@db_name, @base_data_dir))
+    end
+  end
+
+  class Backend
+    def initialize(db_name)
+      @db_name = db_name
+    end
+
+    def running?
+      return false if `pgrep 4s-backend`.empty?
+      return true
+    end
+
+    def open
+      unless running?
+        puts `4s-backend #{@db_name}`
+        raise "Failed to start 4store backend: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
+      end
+    end
+
+    def close
+      if running?
+        puts `pkill 4s-backend`
+        raise "Failed to stop 4store backend: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
+      end
+    end
+  end
+
+  class Httpd
+    include TripleStoreDrivers::HttpHandler
+    def initialize(http_port, db_name)
+      @http_port = http_port
+      @db_name = db_name
+    end
+
+    def running?
+      (1..10).each do
+        begin
+          return false if `pgrep 4s-httpd`.empty?
+          sparql_query('SELECT ?s WHERE {?s ?p ?o} LIMIT 1') {}
+          return true
+        rescue Exception => e
+          bogus e
+          sleep 2
+        end
+      end
+      false
+    end
+
+    def open
+      unless running?
+        puts `4s-httpd -p #{@http_port} -s -1 #{@db_name}`
+        raise "Failed to start 4store frontend: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
+      end
+    end
+
+    def close
+      unless `pgrep 4s-httpd`.empty?
+        puts `pkill 4s-httpd`
+        raise "Failed to stop 4store frontend: exit status = #{$?.exitstatus}" unless $?.exitstatus == 0
+      end
+    end
+
+    def size
       return 0 unless running?
       block = Proc.new { |resp|
         return 0 unless resp.body =~ /Total[dht\/<>]+(\d+)/m # <th>Total</th><td>20000000</td>
@@ -166,17 +237,18 @@ module TripleStoreDrivers
       http_get("http://localhost:#{@http_port}/status/size/", block, {}, {})
     end
 
-    def clear()
-      raise IllegalStateError.new("Clear not permitted on #{self}") unless clear_permitted?
-      raise IllegalStateError.new("#{self} is running") if running?
-
-      FileUtils.rm_r(File.expand_path(@db_name, @data_dir))
-      FileUtils.rm(File.expand_path(@db_name, @base_data_dir))
-      create()
+    def sparql_query(sparql, format='application/sparql-results+json', &block)
+      params = {'query' => sparql}
+      headers = {'accept' => format}
+      http_post("http://localhost:#{@http_port}/sparql/", block, params, headers)
     end
 
-    def to_s()
-      @settings[:name] || '4store (NO NAME)'
+    def sparql_update(sparql, &block)
+      params = {'update' => sparql}
+      headers = {}
+      http_post("http://localhost:#{@http_port}/update/", block, params, headers)
     end
+
   end
+
 end
