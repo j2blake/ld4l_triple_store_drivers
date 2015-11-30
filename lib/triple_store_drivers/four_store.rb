@@ -20,25 +20,6 @@ module TripleStoreDrivers
         @instance = instance
         @settings = settings
       end
-
-      def any_running?()
-        # This is bogus but will work for now.
-        @instance && @instance.running?
-      end
-
-      def close_any
-        if @instance && @instance.running?
-          @instance.close
-          wait_for_shutdown
-        end
-        if any_running?
-          wait_for_shutdown
-        end
-      end
-
-      def wait_for_shutdown()
-        0.step(@settings[:seconds_to_startup], 3) { return unless any_running? }
-      end
     end
 
     #

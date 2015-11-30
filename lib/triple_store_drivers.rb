@@ -42,10 +42,6 @@ module TripleStoreDrivers
   # A triple-store with the current settings is running.
   SELECTED_TRIPLE_STORE_RUNNING = :running
 
-  # A triple-store is running, but it doesn't match the current settings.
-  # This is the default state, when in doubt.
-  OTHER_TRIPLE_STORE_RUNNING = :other_running
-
   # No triple-store is running.
   NO_TRIPLE_STORE_RUNNING = :not_running
 
@@ -58,12 +54,7 @@ module TripleStoreDrivers
     end
 
     def running?
-      case value
-      when SELECTED_TRIPLE_STORE_RUNNING, OTHER_TRIPLE_STORE_RUNNING
-        true
-      else
-        false
-      end
+      SELECTED_TRIPLE_STORE_RUNNING == value
     end
 
     def to_s
@@ -109,12 +100,6 @@ module TripleStoreDrivers
     def status()
       return Status.new(NO_CURRENT_SETTINGS, "No settings.") unless @instance
       return Status.new(SELECTED_TRIPLE_STORE_RUNNING, "Running: #{@instance}") if @instance.running?
-
-      BaseDriver.classes.each do |clazz|
-        running_instance = clazz.any_running?
-        return Status.new(OTHER_TRIPLE_STORE_RUNNING, "Selected: #{@instance}\nRunning: #{running_instance}") if running_instance
-      end
-
       return Status.new(NO_TRIPLE_STORE_RUNNING, "Not running: #{@instance}")
     end
 
@@ -161,9 +146,7 @@ module TripleStoreDrivers
     #
     def shutdown()
       begin
-        BaseDriver.classes.each do |clazz|
-          clazz.close_any
-        end
+        @instance.close if @instance && @instance.running?
       rescue Exception => e
         warning("Failed to stop the triple-store: #{e.message}")
         puts e.backtrace.join("\n")

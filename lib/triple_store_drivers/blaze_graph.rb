@@ -7,31 +7,6 @@ module TripleStoreDrivers
         @instance = instance
         @settings = settings
       end
-
-      def any_running?
-        if `pgrep -f bigdata-bundled`.size > 0
-          return "BlazeGraph on ????"
-        else
-          nil
-        end
-      end
-
-      def close_any
-        if @instance && @instance.running?
-          @instance.close
-          wait_for_shutdown
-        end
-        if any_running?
-          puts "Closing other BlazeGraph."
-          `pkill -f bigdata-bundled`
-          wait_for_shutdown
-        end
-        raise 'Failed to stop BlazeGraph.' if any_running?
-      end
-
-      def wait_for_shutdown
-        0.step(@settings[:seconds_to_startup], 3) { return if `pgrep -f bigdata-bundled`.size == 0 }
-      end
     end
 
     #

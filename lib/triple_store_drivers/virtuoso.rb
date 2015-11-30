@@ -7,43 +7,6 @@ module TripleStoreDrivers
         @instance = instance
         @settings = settings
       end
-
-      def any_running?()
-        init_file = get_current_init_file
-        return "Virtuoso on #{File.dirname(init_file)}" if init_file
-        nil
-      end
-
-      def close_any
-        if @instance && @instance.running?
-          @instance.close
-          wait_for_shutdown
-        end
-        if any_running?
-          isql('shutdown;')
-          wait_for_shutdown
-        end
-      end
-
-      def get_current_init_file
-        response = `ps -ef | grep virtuoso-[t]`
-        if response && response.strip.size > 0
-          response.match(/\S+$/)[0]
-        else
-          nil
-        end
-      end
-
-      def isql(command)
-        output = `isql #{@settings[:isql_port]} #{@settings[:username]} #{@settings[:password]} exec="#{command}" 2>&1`
-        error_here = output.index('Error')
-        raise output[error_here..-1] if error_here
-        output
-      end
-
-      def wait_for_shutdown()
-        0.step(@settings[:seconds_to_startup], 3) { return if `pgrep virtuoso-t`.size == 0 }
-      end
     end
 
     #
@@ -142,7 +105,10 @@ module TripleStoreDrivers
     end
 
     def isql(command)
-      self.class.isql(command)
+      output = `isql #{@settings[:isql_port]} #{@settings[:username]} #{@settings[:password]} exec="#{command}" 2>&1`
+      error_here = output.index('Error')
+      raise output[error_here..-1] if error_here
+      output
     end
 
     def sparql_query(sparql, format='application/sparql-results+json', &block)

@@ -20,15 +20,6 @@ class TestDriver
       @other_running = settings[:test_other_running] || false
       @instance = instance
     end
-
-    def any_running?
-      @other_running || (@instance && @instance.running?)
-    end
-
-    def close_any
-      @other_running = false
-      @instance.close if @instance
-    end
   end
 
   def initialize(settings)

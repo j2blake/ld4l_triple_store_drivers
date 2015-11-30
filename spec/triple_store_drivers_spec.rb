@@ -64,11 +64,6 @@ describe TripleStoreDrivers do
       expect(TripleStoreDrivers.status.value).to eq(TripleStoreDrivers::SELECTED_TRIPLE_STORE_RUNNING)
     end
 
-    it 'knows when some other triple-store is running' do
-      TripleStoreDrivers.select(:class_name => 'TestDriver', :test_other_running => true)
-      expect(TripleStoreDrivers.status.value).to eq(TripleStoreDrivers::OTHER_TRIPLE_STORE_RUNNING)
-    end
-
     it 'knows when nothing is running.' do
       TripleStoreDrivers.select(:class_name => 'TestDriver')
       expect(TripleStoreDrivers.status.value).to eq(TripleStoreDrivers::NO_TRIPLE_STORE_RUNNING)
