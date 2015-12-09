@@ -1,3 +1,4 @@
+require 'benchmark'
 require 'erb'
 require 'fileutils'
 require 'json'
@@ -13,6 +14,7 @@ require_relative "triple_store_drivers/base_driver"
 require_relative "triple_store_drivers/blaze_graph"
 require_relative "triple_store_drivers/four_store"
 require_relative "triple_store_drivers/fuseki2"
+require_relative "triple_store_drivers/instrumented_wrapper"
 require_relative "triple_store_drivers/sesame"
 require_relative "triple_store_drivers/virtuoso"
 
