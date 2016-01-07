@@ -85,5 +85,12 @@ module TripleStoreDrivers
         end
       end
     end
+
+    def inspect_request(r, url)
+      headers = r.to_hash.to_a.map{|h| "   #{h[0]} ==> #{h[1]}"}.join("\n")
+      body = CGI.unescape(r.body)
+      "#{r.method} #{url}\n#{headers}\n#{body}"
+    end
+
   end
 end
